@@ -57,7 +57,15 @@ class NetworkEnvelope:
         # payload is of length payload_length
         # verify checksum
         # return an instance of the class
-        raise NotImplementedError
+        command = s.read(12)
+        command = command.strip(b'\x00')
+        payload_length = little_endian_to_int(s.read(4))
+        checksum = s.read(4)
+        payload = s.read(payload_length)
+        calculated_checksum = hash256(payload)[:4]
+        if calculated_checksum != checksum:
+            raise IOError('checksum does not match')
+        return cls(command, payload, testnet=testnet)
 
     def serialize(self):
         '''Returns the byte serialization of the entire network message'''
@@ -67,7 +75,12 @@ class NetworkEnvelope:
         # payload length 4 bytes, little endian
         # checksum 4 bytes, first four of hash256 of payload
         # payload
-        raise NotImplementedError
+        result = self.magic
+        result += self.command + b'\x00' * (12 - len(self.command))
+        result += int_to_little_endian(len(self.payload), 4)
+        result += hash256(self.payload)[:4]
+        result += self.payload
+        return result
 
     def stream(self):
         '''Returns a stream for parsing the payload'''
@@ -146,7 +159,24 @@ class VersionMessage:
         # useragent is a variable string, so varint first
         # latest block is 4 bytes little endian
         # relay is 00 if false, 01 if true
-        raise NotImplementedError
+        result = int_to_little_endian(self.version, 4)
+        result += int_to_little_endian(self.services, 8)
+        result += int_to_little_endian(self.timestamp, 8)
+        result += int_to_little_endian(self.receiver_services, 8)
+        result += b'\x00' * 10 + b'\xff\xff' + self.receiver_ip
+        result += self.receiver_port.to_bytes(2, 'big')
+        result += int_to_little_endian(self.sender_services, 8)
+        result += b'\x00' * 10 + b'\xff\xff' + self.sender_ip
+        result += self.sender_port.to_bytes(2, 'big')
+        result += self.nonce
+        result += encode_varint(len(self.user_agent))
+        result += self.user_agent
+        result += int_to_little_endian(self.latest_block, 4)
+        if self.relay:
+            result += b'\x01'
+        else:
+            result += b'\x00'
+        return result
 
 
 class VersionMessageTest(TestCase):
